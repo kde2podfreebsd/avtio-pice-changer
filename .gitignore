@@ -1,2 +1,6 @@
 .env
 venv/
+src/db.sqlite
+src/alembic/versions/*.py
+src/supervisord.log
+src/supervisord.pid

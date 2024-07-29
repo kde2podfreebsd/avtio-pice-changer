@@ -1,8 +1,12 @@
-docker_build:
-	docker build -t avito_price_changer .
+main:
+	docker compose build --no-cache
+	docker compose up
 
-docker_run:
-	docker run -it -p 8000:8000 avito_price_changer
+build:
+	docker build -t app src/.  
+
+run:
+	docker run -p 5173:5173 app
 
 clean_repo:
 	find . -name __pycache__ -type d -print0|xargs -0 rm -r --
@@ -11,8 +15,6 @@ clean_repo:
 fix_git_cache:
 	git rm -rf --cached .
 	git add .
-
-.PHONY clean: clean fix_git_cache
 
 docker_clean:
 	sudo docker stop $$(sudo docker ps -a -q) || true

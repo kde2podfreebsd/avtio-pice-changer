@@ -1,49 +1,19 @@
+from bot.config import bot
 import os
-import asyncio
-import logging
-from math import ceil
 from dotenv import load_dotenv
-from telebot.async_telebot import AsyncTeleBot
+from bot.context import message_context_manager
+from bot.config import qc
 from telebot import types
-from db import QuoteController
-from typing import Dict, List, Optional
+from math import ceil
 import datetime
 from utils import ItemStatus
-from avito import AvitoCore
-
-logging.basicConfig(level=logging.INFO)
+from avito.core import AvitoCore
 
 load_dotenv()
 
-bot = AsyncTeleBot(os.getenv('TELEGRAM_BOT_TOKEN'))
-qc = QuoteController(os.getenv('DB_PATH'))
 QUOTES_PER_PAGE = int(os.getenv("QUOTES_PER_PAGE"))
 
-class MessageContextManager:
-    _instance: Optional['MessageContextManager'] = None
-
-    def __new__(cls, *args, **kwargs) -> 'MessageContextManager':
-        if not cls._instance:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self) -> None:
-        self.help_menu_msgId_to_delete: Dict[int, List[int]] = {}
-
-    def add_msgId_to_help_menu_dict(self, chat_id: int, msgId: int) -> None:
-        self.help_menu_msgId_to_delete.setdefault(chat_id, []).append(msgId)
-
-    async def delete_msgId_from_help_menu_dict(self, chat_id: int) -> None:
-        try:
-            msg_ids = self.help_menu_msgId_to_delete.pop(chat_id, [])
-            for msg_id in msg_ids:
-                await bot.delete_message(chat_id, msg_id)
-        except Exception as e:
-            raise Exception(f"Не удалось удалить сообщения: {chat_id}, {msg_ids} | Exception: {e}")
-
-message_context_manager: MessageContextManager = MessageContextManager()
-
-async def main_menu(message, page=1) -> None:
+async def quotes_menu(message, page=1) -> None:
     await message_context_manager.delete_msgId_from_help_menu_dict(message.chat.id)
     if message.chat.id in [int(x) for x in os.getenv("ADMIN_CHATIDS").replace("[", "").replace("]", "").replace(" ", "").split(",")]:
         all_ads = qc.get_all_ads()
@@ -58,13 +28,13 @@ async def main_menu(message, page=1) -> None:
         
         if amount_of_pages != 1:
             back = types.InlineKeyboardButton(
-                text="<", callback_data=f"main_menu#{page - 1 if page - 1 >= 1 else page}"
+                text="<", callback_data=f"quotes_menu#{page - 1 if page - 1 >= 1 else page}"
             )
             page_cntr = types.InlineKeyboardButton(
                 text=f"{page}/{amount_of_pages}", callback_data="nullified_{}".format(page)
             )
             forward = types.InlineKeyboardButton(
-                text=">", callback_data=f"main_menu#{page + 1 if page + 1 <= amount_of_pages else page}"
+                text=">", callback_data=f"quotes_menu#{page + 1 if page + 1 <= amount_of_pages else page}"
             )
             keyboard.add(back, page_cntr, forward)
 
@@ -72,11 +42,6 @@ async def main_menu(message, page=1) -> None:
             text='Обновить цену всем объявлениям', callback_data="update_all_prices"
         )
         keyboard.add(update_all_prices)
-
-        garantex_url = types.InlineKeyboardButton(
-            text="Garantex", url="https://garantex.org/"
-        )
-        keyboard.add(garantex_url)
 
         msg = await bot.send_message(
             message.chat.id,
@@ -93,17 +58,17 @@ BTC price on {datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")}: {qc.get_cu
     else:
         await bot.send_message(message.chat.id, '<b>Access denied</b>', parse_mode="html")
 
-@bot.message_handler(commands=['start'])
-async def start(message) -> None:
-    await main_menu(message)
+@bot.message_handler(commands=['items'])
+async def quotes_menu_handler(message) -> None:
+    await quotes_menu(message)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('main_menu'))
-async def main_menu_inline(call) -> None:
+@bot.callback_query_handler(func=lambda call: call.data.startswith('quotes_menu'))
+async def quotes_menu_inline(call) -> None:
     try:
         page = int(call.data.split('#')[1])
     except IndexError:
         page = 1
-    await main_menu(call.message, page)
+    await quotes_menu(call.message, page)
 
 def prepare_quote_message(avito_id):
     quote = qc.get_ad_by_avito_id(avito_id=avito_id)
@@ -125,7 +90,7 @@ Avito статус: {'✅ Active' if quote[5] == ItemStatus.ACTIVE.value else f'
         types.InlineKeyboardButton(text="🔗 Item URL", url=quote[7]),
         types.InlineKeyboardButton(text=f"Status: {'✅ Active' if quote[9] else f'❌ Disabled'}", callback_data=f"change_status_{avito_id}"),
         types.InlineKeyboardButton(text="🔄 Обновить цену", callback_data=f"updateprice_{avito_id}"),
-        types.InlineKeyboardButton(text="🔙 Back", callback_data="main_menu#1")
+        types.InlineKeyboardButton(text="🔙 Back", callback_data="quotes_menu#1")
     )
     return message, keyboard
 
@@ -178,10 +143,6 @@ async def update_all_prices(call):
     if await avito.update_items_price():
         qc.update_last_time_update_for_all_quotes()
         await bot.answer_callback_query(call.id, "Prices updated successfully!")
-        await main_menu(call.message)
+        await quotes_menu(call.message)
     else:
         await bot.answer_callback_query(call.id, "Failed to update prices.")
-    
-if __name__ == '__main__':
-    qc.create_quote_table()
-    asyncio.run(bot.polling())
